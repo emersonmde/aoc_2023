@@ -1,8 +1,12 @@
+use std::cell::RefCell;
 use std::cmp;
+use std::collections::HashMap;
+use std::rc::Rc;
 use common::read_input;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 struct Number {
+    value: u32,
     position: (u32, u32),
     length: u32,
 }
@@ -21,24 +25,32 @@ fn main() {
         numbers.extend(numbers_in_line);
     }
 
-    let mut i = 0;
+    let mut part_number_sum = 0;
+    let gears: Rc<RefCell<HashMap<(u32, u32), Vec<Number>>>> = Rc::new(RefCell::new(HashMap::new()));
     for number in &numbers {
-        if is_part_number(&number, &input.clone()) {
+        if is_part_number((*number).clone(), &input.clone(), gears.clone()) {
             let (x, y) = number.position;
             let number_string: String = input[y as usize].to_owned().into_iter().collect();
             let number_string = &number_string[x as usize..(x + number.length) as usize].to_string();
             let number_value = number_string.parse::<u32>().unwrap();
 
-            i += number_value;
+            part_number_sum += number_value;
             println!("Part number: {:?}", &number_value);
         }
     }
-    println!("Part numbers: {}", i);
+    println!("Part numbers: {}", part_number_sum);
+
+    let sum_of_gear_ratios: u64 = gears.borrow().iter()
+        .filter(|(_, v)| v.len() == 2)
+        .map(|(_, v)| v.iter().map(|n| n.value as u64).product::<u64>())
+        .sum();
+    println!("Sum of gear ratios: {}", sum_of_gear_ratios);
 }
 
 fn find_numbers_in_line(input: &Vec<char>, line_num: u32) -> Vec<Number> {
     let mut numbers: Vec<Number> = Vec::new();
 
+    let mut current_number: Option<String> = None;
     let mut current_position: Option<(u32, u32)> = None;
     let mut current_length: Option<u32> = None;
 
@@ -47,39 +59,58 @@ fn find_numbers_in_line(input: &Vec<char>, line_num: u32) -> Vec<Number> {
             if current_position.is_none() {
                 current_position = Some((index as u32, line_num));
                 current_length = Some(1);
+                current_number = Some(character.to_string());
             } else {
                 current_length = Some(current_length.unwrap() + 1);
+                current_number = Some(format!("{}{}", current_number.unwrap(), character));
             }
         } else {
             if current_position.is_some() {
                 numbers.push(Number {
+                    value: current_number.unwrap().parse::<u32>().unwrap(),
                     position: current_position.unwrap(),
                     length: current_length.unwrap(),
                 });
+                current_number = None;
                 current_length = None;
                 current_position = None;
             }
         }
     }
 
+    if let Some(position) = current_position {
+        numbers.push(Number {
+            value: current_number.unwrap().parse::<u32>().unwrap(),
+            position: position,
+            length: current_length.unwrap(),
+        });
+    }
+
     numbers
 }
 
-fn is_part_number(number: &Number, schematic: &Vec<Vec<char>>) -> bool {
+fn is_part_number(number: Number, schematic: &Vec<Vec<char>>, mut gears: Rc<RefCell<HashMap<(u32, u32), Vec<Number>>>>) -> bool {
     let (x, y) = number.position;
     let length = number.length;
     let max_x = schematic[0].len() as u32;
     let max_y = schematic.len() as u32;
 
-    let start = cmp::max(x, 1) - 1;
-    let end = cmp::min(x + length, max_x - 1);
-    let yrange = [cmp::max(y, 1) - 1, y, cmp::min(y + 1, max_y - 1)];
+    let start_x = if x > 0 { x - 1 } else { 0 };
+    let end_x = cmp::min(x + length, max_x - 1);
+    let start_y = if y > 0 { y - 1 } else { 0 };
+    let end_y = cmp::min(y + 1, max_y - 1);
 
-    for y in yrange.iter() {
-        for x in start..end {
-            let character = schematic[*y as usize].get(x as usize).expect("Character not found");
-            if !character.is_alphanumeric() && character != &'.' {
-                println!("Character {:?} at position ({}, {}) is not alphanumeric", character, x, y);
+    for y in start_y..=end_y {
+        for x in start_x..=end_x {
+            let character = schematic[y as usize].get(x as usize).expect("Character not found");
+            if character == &'*' {
+                // Add Number to (x, y) in gears
+                let mut gears = gears.borrow_mut();
+                let mut numbers = gears.entry((x, y)).or_insert(Vec::new());
+                numbers.push(number.clone());
+            }
+            if !character.is_numeric() && character != &'.' {
+                println!("Character {:?} at position ({}, {}) is a part number", character, x, y);
                 return true;
             }
         }
